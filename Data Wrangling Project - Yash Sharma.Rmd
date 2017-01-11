@@ -1,0 +1,504 @@
+---
+title: "Data Wrangling Project"
+author: "Yash Sharma"
+date: "10 December 2016"
+output:
+  rmarkdown::html_document:
+    code_folding: show
+    theme: lumen
+---
+
+## Movie Exploratory Analysis (Using IMDB datasets) {.tabset}
+
+### **Synopsis**
+
+  1. **Problem Statement**: The objective of this project is to explore the Kaggle Movies dataset and answers some interesting questions like which countries produce most movies, profitability analysis, kind of movies are most produced, most produced genres etc. I want to explore few of the 28 columns in detail.
+
+***
+
+  2. **Solution Overview**: Post the data cleaning, univariate and multi-variate exploration of the data helped us answer some of the above questions. A variety of packages were used for this exercise, which are explained in the later sections. Each analysis has been explained along with its codes. 
+
+***
+  
+  3. **Insights**: Some very interesting insights were obtained from this analysis:
+  
+    * Drama, Comedy and Thriller are the top genres. The frequency of movies decreases exponentially.
+    * US has the most thriving movie industry, and movies are being produced since the early-mid nineties. Japan, Italy, germany and France being only other countries which produced significant number of movies before 1980s.
+    * India has significantly higher average movie budget (~100 M$) than other countries (However, average is not robust to outliers)
+    * New Zealand tops the average movie revenue (~90 M$), and is significantly higher than the second highest Taiwan.
+    * English is the language in which most movies are made.
+    * Average movie IMDB Score is 6.4 and 90% of movies have a score between 8.1 and 4.3. IMDB scores follow a bell shaped distribution.
+    * Movies with higher IMDB score tend to have higher revenue (as shown in the 3D scatter plot)
+    * Significant number of movies go into loss (as shown in the 3D scatter plot)
+
+***
+
+*Assumption: The results we get might be biased due to the kind of movies in out dataset. This might not represent a true picture of the population of movies.*
+
+### **Packages Required**
+
+  1. **Following packages were used:**
+  
+    * Tibble: Used to store data as a tibble, and makes it much easier to handle and manipulate data
+    * DT: Used to display the data on the screen in a scrollable format
+    * Knitr: Used to display an aligned table on the screen
+    * TM: Used for text mining on the "Genre" columns in the data
+    * Dplyr: Used for data manipulation
+    * Ggplot2: Used to plot charts
+    * Wordcloud: Used to chart wordcloud in the genre text analysis
+    * Fitdistrplus: Used for statistical analysis (distribution fitting)
+    * Plotly: Used to plot interactive charts
+    * Plyr: Used for data transformation
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(tibble)
+library(DT)
+library(knitr)
+library(tm)
+library(ggplot2)
+library(wordcloud)
+library(dplyr)
+library(fitdistrplus)
+library(plotly)
+library(plyr)
+```
+
+***
+
+### **Data Preparation** {.tabset}
+
+This sections contains all the procedures followed in getting the data analysis ready. Each step has been explained and the codes have been given.
+
+#### Data Import
+
+**IMDB 5000 Movie Dataset from Kaggle**
+
+This dataset contains 28 variables about 5,043 movies spanning across 100 years in 66 countries. There are 2399 unique director names, and thousands of actors/actresses.
+
+Since Kaggle requires a username and password to download the dataset, I am sourcing the same data from my Github library [here](https://github.com/yash91sharma/projectX/blob/master/movie_metadata.csv)
+
+More information about the dataset can be found on the Kaggle page [here.](https://www.kaggle.com/deepmatrix/imdb-5000-movie-dataset)
+
+Data Import Code:
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(tibble)
+url <- "https://github.com/yash91sharma/projectX/raw/master/movie_metadata.csv"
+movie <- as_data_frame(read.csv(url, stringsAsFactors = FALSE))
+class(movie)
+colnames(movie)
+dim(movie)
+```
+
+***
+
+#### Data Cleaning
+
+The first part of data cleaning involves removal of spurious characters (Â) from a the movie title, genre and plot keyword columns. This could have come up during data scrapping from the net.
+
+Then we remove the duplicates in the data, using then "movie_title" column. Duplicate data will skew our analysis hence needs to be removed.
+
+Third part of data cleaning is the currency columns. The "Budget" and "Gross" (revenue) columns for a few countries were not converted to USD while compiling the data. Hence I have done this manually. This cleaning will help us compare these financial columns across movies and countries. All the currency rates were taken from [XE.com](http://www.xe.com/) as of December 10th 2016.
+
+Lastly I created a profit_flag column, which is 1 if the movie is profitable (Revenue > Budget) and 0 otherwise.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+movie$movie_title <- (sapply(movie$movie_title,gsub,pattern="\\Â",replacement=""))
+movie$genres_2 <- (sapply(movie$genres,gsub,pattern="\\|",replacement=" "))
+movie$plot_keywords_2 <- (sapply(movie$plot_keywords,gsub,pattern="\\|",replacement=" "))
+
+movie = movie[!duplicated(movie$movie_title),]
+
+movie <- transform(movie, budget = ifelse(country == "South Korea", budget/1173.49, budget))
+movie <- transform(movie, budget = ifelse(country == "Japan", budget/115.33, budget))
+movie <- transform(movie, budget = ifelse(country == "Turkey", budget/3.49, budget))
+movie <- transform(movie, budget = ifelse(country == "Hungary", budget/298.17, budget))
+movie <- transform(movie, budget = ifelse(country == "Thailand", budget/35.67, budget))
+
+movie <- transform(movie, gross = ifelse(country == "South Korea", gross/1173.49, gross))
+movie <- transform(movie, gross = ifelse(country == "Japan", gross/115.33, gross))
+movie <- transform(movie, gross = ifelse(country == "Turkey", gross/3.49, gross))
+movie <- transform(movie, gross = ifelse(country == "Hungary", gross/298.17, gross))
+movie <- transform(movie, gross = ifelse(country == "Thailand", gross/35.67, gross))
+
+movie$profit_flag <- as.factor(ifelse((movie$gross > movie$budget),1,0))
+```
+
+***
+
+After the data cleaning, I once again check the number of rows and columns, as shown in the code below. The results show 4,917 unique movies.
+
+***
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+dim(movie)
+```
+
+***
+
+Missing Values
+
+There are 3,700 rows which do not have any missing value.For Character values missing values are blanks, while numeric variables have missing values as NAs. But I have decided not to remove any rows with missing data yet. I will take care of this issue while doing individual analysis.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+print(paste(sum(complete.cases(movie)),"Complete cases!"))
+```
+
+***
+
+#### Data Preview
+
+In the data, each row is a movie and the columns are the information regarding the movie.
+
+Preview (top 50 rows) of the cleaned dataset:
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(DT)
+datatable(head(movie,50))
+```
+
+***
+
+#### Data Description
+
+Below is the table containing the the variable names, data types and a short description.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+Variable.type <- lapply(movie,class)
+Variable.desc <- c("Specifies if it was color/black & white movie",
+"Name of movie director","Number of critics who reviewed",
+"Duration of the movie (minutes)","Number of likes on director's FB page",
+"Number of likes on 3rd actor's FB page","Name of second actor",
+"Number of likes on 1st actor's FB page","Gross earning by the movie ($)",
+"Genres of the movie","Name of the first actor",
+"Title of the movie","Number of users voted on IMDB",
+"Total facebook likes for all cast members","Name of the third actor",
+"Number of the actor who featured in the movie poster",
+"Keywords describing the movie plot","IMDB link of the movie",
+"Number of users who gave a review","Language of the movie",
+"Country the movie was produced in",
+"Content rating of the movie","Budget of the movie ($)",
+"Year the movie released in","Number of facebook likes for actor 2",
+"IMDB score for the movie (out of 10)","Aspect ratio the movie was made in",
+"Number of facebook likes","Cleaned genre column","Cleaned Plot keyword column",
+"Flag indicating profitability of the movie (1-profit, 0-loss)")
+Variable.name1 <- colnames(movie)
+data.desc <- as_data_frame(cbind(Variable.name1,Variable.type,Variable.desc))
+colnames(data.desc) <- c("Variable Name","Data Type","Variable Description")
+library(knitr)
+kable(data.desc)
+```
+
+***
+
+### **Exploratory Data Analysis** {.tabset}
+
+In this section, I have tried to use a very diverse set of packages, functions and graphical methods to explore the movies dataset. These methods include simple representations like a bar chart to statistical heavy distribution fitting.
+
+#### Genre Analysis
+
+Each movie in my dataset had more than one genre, hence some cleaning and genre separation was required. Some pre-built functions in the "TM" package were very useful. In short, in the Analysis of Genre, the following was done:
+  1. Cleaning of the Genre Variable
+  2. Converting Genre variable to Corpus
+  3. Frequency Analysis: See which are the most used genres in a movie
+  4. Genre Associations Analysis: See which genres are closely associated and used together in a movie
+
+Drama, Comedy and Thriller are the top movie genres, as showm in the below Word-Cloud and Bar-Chart
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(tm)
+library(dplyr)
+library(ggplot2)
+library(wordcloud)
+library(plyr)
+genre <- Corpus(VectorSource(movie$genres_2))
+genre_dtm <- DocumentTermMatrix(genre)
+genre_freq <- colSums(as.matrix(genre_dtm))
+freq <- sort(colSums(as.matrix(genre_dtm)), decreasing=TRUE) 
+genre_wf <- data.frame(word=names(genre_freq), freq=genre_freq)
+
+ggplot(genre_wf, aes(x=reorder(word,-freq), y=freq))+ 
+  geom_bar(stat="identity")+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  ggtitle("Movie Genre frequency graph")+
+  xlab("Genre")+
+  ylab("Frequency")
+
+set.seed(10)
+pal2 <- brewer.pal(8,"Dark2")
+wordcloud(genre_wf$word,genre_wf$freq,random.order=FALSE,
+          rot.per=.15, colors=pal2,scale=c(4,.9),
+          title="WordCloud: Movie Genres")
+```
+
+***
+
+Genre Association Analysis: Here I have analyzed which genres occur together in a movie. Since most of the movies in our database have multiple Genres, it would be interesting to understand how do these genres overlap.
+
+I made a custom function, which finds the association for each genre and then binds all the individual results together to show them on a single graph.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+word_assoc <- function(word)
+{
+  assoc_1 <- as.data.frame(findAssocs(genre_dtm,c(word),corlimit = 0.1))
+  assoc_1$words <- rownames(assoc_1)
+  colnames(assoc_1)[1] <- c("score")
+  assoc_1$key <- c(word)
+  rownames(assoc_1) <- NULL
+  return(assoc_1)
+}
+
+drama_assoc <- word_assoc("drama")
+comedy_assoc <- word_assoc("comedy")
+thriller_assoc <- word_assoc("thriller")
+action_assoc <- word_assoc("action")
+romance_assoc <- word_assoc("romance")
+adventure_assoc <- word_assoc("adventure")
+crime_assoc <- word_assoc("crime")
+assoc <- rbind(drama_assoc,comedy_assoc,thriller_assoc,action_assoc,
+               romance_assoc,adventure_assoc,crime_assoc)
+
+assoc$n = as.numeric(factor(assoc$key))
+assoc = ddply(assoc,.(key,words),transform, x=paste(c(rep(' ',n-1), words), collapse=''))
+assoc$x = factor(assoc$x, levels=assoc[order(assoc$score), 'x'])
+
+ggplot(assoc,aes(x=x,y=score))+
+  geom_bar(stat="identity")+
+  facet_grid(~key,scales = 'free',space="free_x")+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  ylab("Association Score")+
+  xlab("Genre")+
+  ggtitle("Genre Associations")
+
+```
+
+The above graph shows the association strength, which can be thought of as a correlation to understand easily. The score is between 0 and 1. Lower score means they two genres in question were not used together while a higher score shows strong association.
+
+***
+
+#### Country
+
+This part of the analysis deals with exploring the country variable. The first part shows how many movies were produced in which countries across the years. I have tried to show that through a heat map. Dark blue indicates more number of movies produces and vice-versa.
+
+Most of the countries started producing movies in the early 2000s, except a handful which had prevalant movie production going on since the mid 1900s.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, fig.width=9, fig.height=8}
+detach("package:plyr", unload=TRUE)
+library(dplyr) 
+country_count <- movie %>%
+  subset(country != "") %>%
+  subset(country != "New Line") %>%
+  na.omit() %>%
+  group_by(country,title_year) %>%
+  summarise(count=n())
+
+colnames(country_count)[3] <- "Movie_Count"
+ggplot(country_count,aes(title_year,country))+
+  geom_tile(aes(fill=Movie_Count),colour="white")+
+  scale_fill_gradient(low="light blue",high = "dark blue")+
+  xlab("Year of movie release")+
+  ylab("Country")+
+  ggtitle("Heat Map: Country vs Movie Release Year")+
+  guides(fill=FALSE)
+```
+
+***
+
+The second part deals with exploring how does the budget varies by each country. I have assumed that the budget given in the data is the amount of money required to produce the movie. However lot of times there are over runs and other costs involved after a movie is released. The variation is definitely not linear, the top countries have significantly higher movies budgets while the bottom ones have significantly lower movie budgets. (Outliers were removed):
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, fig.width=9}
+country_summary <- movie %>%
+  subset(country != "") %>%
+  subset(country != "New Line") %>%
+  group_by(country) %>%
+  summarise(count=n(),
+            avg_score=mean(imdb_score,na.rm="true"),
+            avg_budget = mean(budget,na.rm="true"),
+            avg_gross = mean(gross,na.rm="true"))
+country_with_multiple_movies <- subset(country_summary,count>1)[1]
+ggplot(country_summary[complete.cases(country_summary), ],
+       aes(x=reorder(country,-avg_budget),avg_budget/1000000))+
+  geom_bar(stat = "identity")+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  ylab("Average Movie Budget (Million $)")+
+  xlab("")+
+  ggtitle("Average Movie Budget by Country")
+
+budget_rank <- country_summary[complete.cases(country_summary), c(1,4)]
+budget_rank <- budget_rank[order(-budget_rank$avg_budget),]
+budget_rank$rank <- seq.int(nrow(budget_rank))
+movie_temp <- merge(x=movie,y=budget_rank, by = "country",all.x = TRUE)
+
+ggplot(subset(movie_temp,country %in% country_with_multiple_movies$country),
+       aes(x=reorder(country,rank),y=budget/1000000))+
+  geom_boxplot()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  ylab("Average Movie Budget (Million $)")+
+  xlab("")+
+  ggtitle("Movie Budget variation by Country")+
+  ylim(0,100)
+rm(movie_temp)
+```
+
+***
+
+The third part in country analysis deals with exploring the gross revenue for the movie across the countries (Similar to the above analysis). Here the top 5 are significantly higher (more than 50 M USD) than the rest  while the 6th highest is approximately 35 USD.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, fig.width=9}
+ggplot(country_summary[complete.cases(country_summary), ],
+       aes(x=reorder(country,-avg_gross),avg_gross/1000000))+
+  geom_bar(stat = "identity")+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  ylab("Average Movie Revenue (Million $)")+
+  xlab("")+
+  ggtitle("Average Movie Revenue by Country")
+
+revenue_rank <- country_summary[complete.cases(country_summary), c(1,5)]
+revenue_rank <- revenue_rank[order(-revenue_rank$avg_gross),]
+revenue_rank$rank <- seq.int(nrow(revenue_rank))
+movie_temp <- merge(x=movie,y=revenue_rank, by = "country",all.x = TRUE)
+
+ggplot(subset(movie_temp,country %in% country_with_multiple_movies$country),
+       aes(x=reorder(country,rank),y=gross/1000000))+
+  geom_boxplot()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  ylab("Average Movie Revenue (Million $)")+
+  xlab("")+
+  ggtitle("Movie Revenue variation by Country")+
+  ylim(0,50)
+rm(movie_temp)
+
+```
+
+***
+
+In the fifth and the final part has the analysis, I have seen which country released which languages of films. English is obviosuly the language overlapping most countries, but the below heat map helps us get a better picture. Dark blue indicates higher number of movie released.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+country_language <- movie %>%
+  subset(country != "") %>%
+  subset(language != "") %>%
+  group_by(country,language) %>%
+  summarise(count=n())
+
+colnames(country_language)[3] <- "Movie_Count"
+ggplot(country_language,aes(language,country))+
+  geom_tile(aes(fill=log(Movie_Count)),colour="white")+
+  scale_fill_gradient(low="light blue",high = "dark blue")+
+  xlab("Language")+
+  ylab("Country")+
+  ggtitle("Heat Map: Country vs Language")+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  guides(fill=FALSE)
+```
+
+***
+
+We can see below that USA produces movies in most number of languages (14), followed by UK.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+  movie %>%
+  group_by(country) %>%
+  summarise(num = n_distinct(language)) %>%
+  arrange(-num) %>%
+  subset(num > 3) %>%
+  ggplot(aes(y=num,x=reorder(country,-num)))+
+    geom_bar(stat = "identity")+
+    xlab("")+ylab("Number of Languages")+
+    ggtitle("Top countries by number of languages of films produced")
+```
+
+***
+
+#### IMDB Score Analysis
+
+In here, I have tried to see which kind of movies are more successful in terms of the IMDB ratings.
+
+We first start by looking at the basic central tendency (mean) and the variation in movie score. For this purpose I have plotted a histogram which also has the 5th and 95th percentile mark for the IMDB score.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+ggplot(movie,aes(imdb_score))+
+  geom_histogram(bins=80)+
+  geom_vline(xintercept = mean(movie$imdb_score,na.rm = TRUE),colour="steel blue")+
+  geom_vline(xintercept = quantile(movie$imdb_score, prob = c(0.05)),colour="red",linetype = "longdash")+
+  geom_vline(xintercept = quantile(movie$imdb_score, prob = c(0.95)),colour="red",linetype = "longdash")+
+  annotate("text", label = "5th Percentile (4.3)",x = 4.2, y = 100, size = 4, colour = "red",angle=90)+
+  annotate("text", label = "95th Percentile (8.1)",x = 8.2, y = 100, size = 4, colour = "red",angle=90)+
+  annotate("text", label = "Mean (6.4)",x = 6.3, y = 100, size = 4, colour = "light blue",angle=90)+
+  ylab("Count of Movies")+
+  xlab("IMDB Score")+
+  ggtitle("Histogram: IMDB Score")
+```
+
+***
+
+Since I could see a bell shaped graph, I also tried to check which distribution best represents this data distribution. I plotted a quick "Cullen and Frey Graph" which basically separates distributions on the bases of Kurtosis and Square of Skewness. The IMDB score fell somewhere between Gamma and Lognormal distributions. I did not perform further distribution fitting for this particular project.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+library(fitdistrplus)
+descdist(movie$imdb_score, boot = 100)
+```
+
+***
+
+I wanted to study the relationship between IMDB score, revenue and budget of the movie. So I plotted a 3D scatter plot using the "plotly" package. This is an interactive graph and hence we can comfortably see the relationship between the three variable. Red signifies loss for the movie while blue signifies profit:
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+library(plotly)
+plot_ly(movie, x = ~imdb_score, y = ~budget/1000000, z = ~gross/1000000, 
+        color = ~profit_flag, colors = c('#BF382A', '#0C4B8E'),size = I(3)) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'IMDB Score'),
+                      yaxis = list(title = 'Budget (M$)'),
+                      zaxis = list(title = 'Revenue (M$)')),
+         title = "INTERACTIVE 3D Scatter plot: IMDB Score vs Revenue vs Budget",
+         showlegend = FALSE)
+
+```
+
+***
+
+Then I wanted to see which countries do well in terms of the movie IMDB Score. I combines this analysis with the overall profitability of the movies produced in the country (total revenue - total budget). Scatter plot below shows this analysis. Size if the bubble indicates the number of movies produced in the country while colour shows protability (Green is profit, red is loss):
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(plotly)
+imdb_country <- movie %>%
+  group_by(country) %>%
+  summarise(num_movie = n(),
+            avg_score = mean(imdb_score,na.rm=TRUE),
+            profit = (sum(gross,na.rm=TRUE)-sum(budget,na.rm=TRUE))/1000000) %>%
+  subset(country != "") %>%
+  subset(num_movie > 5) %>%
+  arrange(-num_movie)
+imdb_country$profit_flag <- as.factor(ifelse(imdb_country$profit > 0 , 1,0))
+imdb_country$profit_2 <- imdb_country$profit + 2009
+
+plot_ly(imdb_country, x = ~profit_2, y = ~avg_score, 
+        color = ~profit_flag, colors = c('red', 'green'),
+        size = ~num_movie,text=~country) %>%
+  add_markers() %>%
+  layout(xaxis = list(type = "log",title="Profitability",
+                      zeroline = TRUE,showline = TRUE,showticklabels = FALSE,showgrid = TRUE),
+         yaxis = list(title="Average IMDB Score",
+                      zeroline = TRUE,showline = TRUE,showticklabels = FALSE,showgrid = TRUE),
+         title = "Interactive Scatter: IMDB Score vs Profitability",
+         showlegend = FALSE)
+```
+
+***
+
+### **Summary**
+
+The above exersice helped us understand the movies dataset better. Now we have answers to some inetersting questions and are in a position to do follow-up and deep dive analysis. The following is the summary of the analysis:
+
+  * Drama, Comedy and Thriller are the top genres. As seen in the bar chart and wordcloud
+  * US has the most thriving movie industry, and movies are being produced since the early-mid nineties. Japan, Italy, germany and France being only other countries which produced significant number of movies before 1980s.
+  * India has significantly higher average movie budget (~100 M$) than other countries (However, average is not robust to outliers). I believe few movies have skewed this result (as seen from the revenue box plot)
+  * New Zealand tops the average movie revenue (~90 M$), and is significantly higher than the second highest Taiwan.
+  * English is the language in which most movies are made. And USA produces movies in 14 languages, most by any country
+  * Average movie IMDB Score is 6.4 and 90% of movies have a score between 8.1 and 4.3. IMDB scores follow a bell shaped distribution. So any movie having a score of more than 8.1 would be one of the top 5% movies in the world.
+  * Movies with higher IMDB score tend to have higher revenue (as shown in the 3D scatter plot). Here IMDB score and Revenue might be correlated. People prefer to watch famous and good movies. 
+  * Significant number of movies go into loss (as shown in the 3D scatter plot)
+
+***
+
+***
